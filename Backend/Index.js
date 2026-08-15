@@ -24,8 +24,12 @@ const MONGO_URI =
 const MQTT_BROKER = "mqtt://localhost:1883";
 const MQTT_TOPIC = "aquasense/sensors";
 
+// READ FROM .env INSTEAD OF HARDCODING
+const SERIAL_PORT_PATH = process.env.SERIAL_PORT || null;
+const SERIAL_BAUD_RATE = 9600;
+
 // ─────────────────────────────────────────────────────────────
-// GENERAL THRESHOLDS ONLY (Matches Frontend)
+// THRESHOLDS
 // ─────────────────────────────────────────────────────────────
 
 const THRESHOLDS = {
@@ -49,8 +53,10 @@ const FIELDS = [
 // ─────────────────────────────────────────────────────────────
 
 function computeStatus(doc) {
+  // FIX: Handle missing values
   for (const [key, range] of Object.entries(THRESHOLDS)) {
     const value = doc[key];
+    if (value === undefined || value === null) continue;
     if (value < range.min || value > range.max) {
       return "danger";
     }
@@ -147,7 +153,7 @@ app.get("/data", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// BOAT CONTROL ENDPOINT (Joystick)
+// BOAT CONTROL
 // ─────────────────────────────────────────────────────────────
 
 let currentBoatCommand = { forward: 0, turn: 0 };
@@ -157,7 +163,6 @@ app.post("/boat/control", (req, res) => {
   currentBoatCommand = { forward, turn };
   console.log(`[BOAT] Forward: ${forward}%, Turn: ${turn}%`);
   
-  // Send to Arduino if connected
   if (serialPort && serialPort.isOpen) {
     const command = `${forward},${turn}\n`;
     serialPort.write(command);
@@ -216,60 +221,22 @@ function startMqtt() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SERIAL PORT - AUTO DETECT ARDUINO
+// SERIAL PORT
 // ─────────────────────────────────────────────────────────────
 
 let serialPort = null;
-let isScanning = false;
 
-async function findAndConnectArduino() {
-  if (isScanning) return;
-  isScanning = true;
-  
-  try {
-    console.log("[SERIAL] Scanning for Arduino...");
-    const ports = await SerialPort.list();
-    
-    const arduinoPort = ports.find(port => {
-      const manufacturer = (port.manufacturer || "").toLowerCase();
-      const path = port.path.toLowerCase();
-      const vid = (port.vendorId || "").toLowerCase();
-      const pid = (port.productId || "").toLowerCase();
-      
-      return manufacturer.includes("arduino") ||
-             manufacturer.includes("ch340") ||
-             manufacturer.includes("cp210") ||
-             vid === "2341" ||           // Arduino Vendor ID
-             pid === "0043" ||           // Arduino Uno
-             path.includes("ttyacm") ||
-             path.includes("ttyusb") ||
-             path.includes("cu.usbmodem");
-    });
-    
-    if (arduinoPort) {
-      console.log(`[SERIAL] ✅ Found Arduino at ${arduinoPort.path}`);
-      connectToSerialPort(arduinoPort.path);
-    } else {
-      console.log("[SERIAL] ⚠️ No Arduino found. Retrying in 5 seconds...");
-      setTimeout(findAndConnectArduino, 5000);
-    }
-  } catch (err) {
-    console.log("[SERIAL] Scan error:", err.message);
-    setTimeout(findAndConnectArduino, 5000);
+function startSerialPort() {
+  // FIX: Check if port is specified
+  if (!SERIAL_PORT_PATH) {
+    console.log("[SERIAL] ⚠️ No SERIAL_PORT in .env. Run node find-port.js");
+    return;
   }
-  
-  isScanning = false;
-}
 
-function connectToSerialPort(portPath) {
-  if (serialPort && serialPort.isOpen) {
-    serialPort.close();
-  }
-  
   try {
     serialPort = new SerialPort({
-      path: portPath,
-      baudRate: 9600,
+      path: SERIAL_PORT_PATH,
+      baudRate: SERIAL_BAUD_RATE,
       autoOpen: true,
     });
     
@@ -304,39 +271,32 @@ function connectToSerialPort(portPath) {
           dissolvedOxygen: Number(payload.dissolvedOxygen),
           conductivity: Number(payload.conductivity),
           source: "serial",
-          deviceId: payload.deviceId || "arduino-auto",
+          deviceId: payload.deviceId || "arduino-serial",
         });
-        
         reading.status = computeStatus(reading);
         await reading.save();
-        console.log("[DB] Saved reading from Arduino");
+        console.log("[DB] Saved reading from Serial (Arduino)");
         broadcastReading(reading);
-        
       } catch (err) {
         console.log("[SERIAL ERROR]", err.message);
       }
     });
     
     serialPort.on("open", () => {
-      console.log(`[SERIAL] ✅ Connected to ${portPath} at 9600 baud`);
-      console.log("[SERIAL] Ready for sensor data and boat commands");
+      console.log(`[SERIAL] ✅ Connected to ${SERIAL_PORT_PATH} at ${SERIAL_BAUD_RATE} baud`);
     });
     
     serialPort.on("error", (err) => {
       console.log("[SERIAL ERROR]", err.message);
       serialPort = null;
-      setTimeout(findAndConnectArduino, 5000);
     });
     
     serialPort.on("close", () => {
-      console.log("[SERIAL] Port closed, reconnecting...");
+      console.log("[SERIAL] Port closed");
       serialPort = null;
-      setTimeout(findAndConnectArduino, 5000);
     });
-    
   } catch (err) {
-    console.log("[SERIAL] Failed to connect:", err.message);
-    setTimeout(findAndConnectArduino, 5000);
+    console.log("[SERIAL] Failed to open port:", err.message);
   }
 }
 
@@ -350,7 +310,7 @@ async function main() {
     await mongoose.connect(MONGO_URI);
     console.log("[DB] MongoDB connected");
     startMqtt();
-    findAndConnectArduino();  // Auto-detect instead of hardcoded port
+    startSerialPort();
     server.listen(PORT, () => {
       console.log(`[HTTP] http://localhost:${PORT}`);
       console.log(`[WS] ws://localhost:${PORT}`);
