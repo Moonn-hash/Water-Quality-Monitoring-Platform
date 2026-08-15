@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell
@@ -9,8 +9,9 @@ const API_URL         = "http://localhost:3000";
 const WS_URL          = "ws://localhost:3000";
 const HISTORY_LIMIT   = 40;
 const HEALTH_INTERVAL = 15000;
+const ALERT_THRESHOLD = 45;
 
-// ─── GENERAL THRESHOLDS (River Use Only) ───────────────────────────────────
+// ─── THRESHOLDS ────────────────────────────────────────────────────────────
 const THRESHOLDS = {
   ph:             { min: 6.0,  max: 9.0,  unit: "",       label: "pH" },
   temperature:    { min: 5,    max: 35,   unit: "°C",     label: "Temperature" },
@@ -40,10 +41,30 @@ const COLORS = {
   conductivity:   "#fbbf24",
 };
 
-// ─── IMPROVED WATER QUALITY SCORE (Linear: 100% at optimal, 0% at threshold) ───
-// Rules:
-// - Inside range: Linear from 100% (optimal) to 0% (at edge)
-// - Outside range: 0% immediately (failed)
+// ─── THEME ──────────────────────────────────────────────────────────────────
+const THEME = {
+  light: {
+    background: "#f0f9ff",
+    card: "#ffffff",
+    text: "#1e293b",
+    textMuted: "#64748b",
+    border: "#e2e8f0",
+    ringBg: "#cbd5e1",
+    tableStripe: "#f8fafc",
+    shadow: "0 1px 3px rgba(0,0,0,0.05)",
+  },
+  dark: {
+    background: "#0f172a",
+    card: "#1e293b",
+    text: "#e2e8f0",
+    textMuted: "#94a3b8",
+    border: "#334155",
+    ringBg: "#475569",
+    tableStripe: "#1e293b",
+    shadow: "0 1px 3px rgba(0,0,0,0.3)",
+  }
+};
+
 function computeQualityScore(reading) {
   const keys = ["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"];
   let totalScore = 0;
@@ -56,20 +77,14 @@ function computeQualityScore(reading) {
     
     validParams++;
     
-    // If ANY parameter is outside safe range → 0% for that parameter
     if (val < t.min || val > t.max) {
       totalScore += 0;
       continue;
     }
     
-    // Inside range: calculate score from 100% down to 0%
     const range = t.max - t.min;
     const optimal = (t.max + t.min) / 2;
-    
-    // Distance from optimal (0 at center, 1 at edge)
     const distanceFromOptimal = Math.abs(val - optimal) / (range / 2);
-    
-    // Linear score: 100% at optimal, 0% at edge
     let paramScore = 100 * (1 - Math.min(1, distanceFromOptimal));
     
     totalScore += paramScore;
@@ -79,27 +94,31 @@ function computeQualityScore(reading) {
   return Math.round(totalScore / validParams);
 }
 
-// Parameter status for display (good/fair/critical)
 function getParamStatus(key, value) {
   const t = THRESHOLDS[key];
   if (!t || value === undefined || value === null) return "good";
-  
-  // Critical if outside safe range OR at the edge (0% score)
   if (value < t.min || value > t.max) return "critical";
-  
-  // Fair if within 15% of the edge (score below 15%)
   const margin = (t.max - t.min) * 0.15;
   if (value < t.min + margin || value > t.max - margin) return "fair";
-  
   return "good";
 }
 
 function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (!ts) return "--:--:--";
+  try {
+    return new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "--:--:--";
+  }
 }
 
 function formatDate(ts) {
-  return new Date(ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  if (!ts) return "--/--/----";
+  try {
+    return new Date(ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  } catch {
+    return "--/--/----";
+  }
 }
 
 const PARAM_STATUS_COLOR = {
@@ -108,12 +127,95 @@ const PARAM_STATUS_COLOR = {
   critical: "#ef4444",
 };
 
-// ─── JOYSTICK COMPONENT ────────────────────────────────────────────────────
+// ─── LOADING SPINNER ────────────────────────────────────────────────────────
+function LoadingSpinner() {
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      minHeight: "100vh",
+      flexDirection: "column",
+      gap: "16px",
+      background: "#f0f9ff"
+    }}>
+      <div style={{
+        width: 48,
+        height: 48,
+        border: "4px solid #e2e8f0",
+        borderTop: "4px solid #2563eb",
+        borderRadius: "50%",
+        animation: "spin 1s linear infinite"
+      }} />
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+      <div style={{ color: "#64748b", fontSize: 14 }}>Loading AquaSense...</div>
+    </div>
+  );
+}
+
+// ─── ERROR BOUNDARY ─────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("App Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+          flexDirection: "column",
+          gap: "12px",
+          padding: "20px",
+          textAlign: "center",
+          background: "#f0f9ff"
+        }}>
+          <div style={{ fontSize: 48 }}>⚠️</div>
+          <h2 style={{ color: "#1e293b" }}>Something went wrong</h2>
+          <p style={{ color: "#64748b" }}>{this.state.error?.message || "Unknown error"}</p>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: "10px 24px",
+              background: "#2563eb",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontSize: 14
+            }}
+          >
+            Refresh Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── JOYSTICK ──────────────────────────────────────────────────────────────
 function Joystick({ onMove, onStop }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [active, setActive] = useState(false);
   const joystickRef = useRef(null);
-  const stickRef = useRef(null);
 
   const handleStart = (e) => {
     setActive(true);
@@ -149,7 +251,6 @@ function Joystick({ onMove, onStop }) {
     
     setPosition({ x: dx, y: dy });
     
-    // Calculate joystick values (-100 to 100)
     const forward = Math.max(-100, Math.min(100, -(dy / maxDist) * 100));
     const turn = Math.max(-100, Math.min(100, (dx / maxDist) * 100));
     
@@ -186,7 +287,6 @@ function Joystick({ onMove, onStop }) {
         onTouchStart={handleStart}
       >
         <div 
-          ref={stickRef}
           style={{
             ...joystickStyles.stick,
             transform: `translate(-50%, -50%) translate(${position.x}px, ${position.y}px)`
@@ -237,7 +337,7 @@ const joystickStyles = {
   },
 };
 
-// ─── QUALITY SCORE RING ────────────────────────────────────────────────────
+// ─── QUALITY RING ──────────────────────────────────────────────────────────
 function QualityRing({ score }) {
   const level      = getQualityLevel(score);
   const radius     = 54;
@@ -247,7 +347,7 @@ function QualityRing({ score }) {
   return (
     <div style={g.ringWrap}>
       <svg width="140" height="140" viewBox="0 0 140 140">
-        <circle cx="70" cy="70" r={radius} fill="none" stroke="#cbd5e1" strokeWidth="12" />
+        <circle cx="70" cy="70" r={radius} fill="none" stroke={g.ringBg} strokeWidth="12" />
         <circle cx="70" cy="70" r={radius} fill="none"
           stroke={level.color} strokeWidth="12" strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={dashOffset}
@@ -257,7 +357,7 @@ function QualityRing({ score }) {
           fontSize="28" fontWeight="700" fontFamily="monospace">
           {score}%
         </text>
-        <text x="70" y="82" textAnchor="middle" fill="#64748b"
+        <text x="70" y="82" textAnchor="middle" fill={g.textMuted}
           fontSize="11" fontFamily="monospace">
           {level.label}
         </text>
@@ -274,7 +374,7 @@ function Gauge({ value, min, max, unit, label, colorKey }) {
   return (
     <div style={g.gaugeWrap}>
       <svg viewBox="0 0 120 80" style={{ width: "100%", overflow: "visible" }}>
-        <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke="#cbd5e1" strokeWidth="8" strokeLinecap="round" />
+        <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke={g.ringBg} strokeWidth="8" strokeLinecap="round" />
         <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
           strokeDasharray={`${pct * 219.9} 219.9`} style={{ filter: `drop-shadow(0 0 6px ${color})` }} />
         <g transform={`translate(60,65) rotate(${angle})`}>
@@ -294,6 +394,9 @@ function Gauge({ value, min, max, unit, label, colorKey }) {
 function StatCard({ label, value, unit, delta, paramKey }) {
   const status = getParamStatus(paramKey, value);
   const color  = PARAM_STATUS_COLOR[status] || PARAM_STATUS_COLOR.good;
+  const meta = THRESHOLDS[paramKey];
+  const optimal = meta ? (meta.min + meta.max) / 2 : null;
+  
   return (
     <div style={{ ...g.statCard, borderLeft: `3px solid ${color}` }}>
       <div style={g.statLabel}>{label}</div>
@@ -309,6 +412,11 @@ function StatCard({ label, value, unit, delta, paramKey }) {
       <div style={{ ...g.paramStatusBadge, background: color + "20", color }}>
         {status === "good" ? "✓ Good" : status === "fair" ? "~ Fair" : "✗ Critical"}
       </div>
+      {optimal !== null && (
+        <div style={{ fontSize: 10, color: g.textMuted, marginTop: 4 }}>
+          Optimal: {optimal}{unit}
+        </div>
+      )}
     </div>
   );
 }
@@ -349,7 +457,7 @@ function StatsPanel({ history }) {
             </div>
             <div style={g.statsPanelRange}>
               <span>{meta.min}{meta.unit}</span>
-              <span style={{ color: "#94a3b8", fontSize: 10 }}>safe range</span>
+              <span style={{ color: g.textMuted, fontSize: 10 }}>safe range</span>
               <span>{meta.max}{meta.unit}</span>
             </div>
           </div>
@@ -379,7 +487,8 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
-export default function App() {
+// ─── MAIN APP ──────────────────────────────────────────────────────────────
+function AppContent() {
   const [history, setHistory] = useState([]);
   const [latest, setLatest] = useState(null);
   const [prev, setPrev] = useState(null);
@@ -388,10 +497,19 @@ export default function App() {
   const [activeParam, setActiveParam] = useState("ph");
   const [tab, setTab] = useState("dashboard");
   const [joystickCommand, setJoystickCommand] = useState({ forward: 0, turn: 0 });
+  const [darkMode, setDarkMode] = useState(false);
+  
+  // ─── DYNAMIC ALERTS ──────────────────────────────────────────────────────
+  const [currentAlert, setCurrentAlert] = useState(null);
+  const [alertHistory, setAlertHistory] = useState([]);
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
+  const [isAlertsViewed, setIsAlertsViewed] = useState(false);
 
   const wsRef = useRef(null);
-  const prevRef = useRef(null);
-  useEffect(() => { prevRef.current = latest; }, [latest]);
+  const reconnectTimeoutRef = useRef(null);
+  const prevLatestRef = useRef(null);
+
+  useEffect(() => { prevLatestRef.current = latest; }, [latest]);
 
   const sendBoatCommand = useCallback(async (command) => {
     try {
@@ -415,58 +533,220 @@ export default function App() {
     sendBoatCommand({ forward: 0, turn: 0 });
   };
 
+  // ─── EXPORT DATA ──────────────────────────────────────────────────────────
+  const exportData = useCallback(() => {
+    if (uniqueHistory.length === 0) {
+      alert("No data to export");
+      return;
+    }
+    
+    const data = uniqueHistory.map(d => ({
+      timestamp: d.createdAt,
+      ph: d.ph,
+      temperature: d.temperature,
+      turbidity: d.turbidity,
+      dissolvedOxygen: d.dissolvedOxygen,
+      conductivity: d.conductivity,
+      score: computeQualityScore(d),
+      status: getParamStatus(d, d.ph) // simplified
+    }));
+    
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aquasense-data-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [history]);
+
   const loadHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/data?limit=${HISTORY_LIMIT}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const sorted = [...data].reverse();
-      setHistory(sorted);
-      if (sorted.length > 0) {
-        setPrev(sorted[sorted.length - 2] || null);
-        setLatest(sorted[sorted.length - 1]);
+      setHistory(data);
+      if (data.length > 0) {
+        const latestReading = data[data.length - 1];
+        setPrev(data[data.length - 2] || null);
+        setLatest(latestReading);
+        updateAlertState(latestReading);
       }
-    } catch { }
+    } catch (err) {
+      console.error("Failed to load history:", err);
+    }
   }, []);
-  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // ─── ALERT LOGIC ──────────────────────────────────────────────────────────
+  const updateAlertState = useCallback((reading) => {
+    if (!reading) return;
+    
+    const score = computeQualityScore(reading);
+    const isAlert = score < ALERT_THRESHOLD;
+    
+    if (isAlert) {
+      const offenders = ["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"]
+        .filter(k => getParamStatus(k, reading[k]) !== "good");
+      
+      const alertData = {
+        id: reading._id || Date.now(),
+        timestamp: reading.createdAt || new Date().toISOString(),
+        score: score,
+        level: getQualityLevel(score),
+        reading: reading,
+        offenders: offenders
+      };
+      
+      if (!currentAlert || currentAlert.id !== alertData.id) {
+        setCurrentAlert(alertData);
+        setAlertHistory(prev => {
+          const exists = prev.some(a => a.id === alertData.id);
+          if (exists) return prev;
+          return [...prev, alertData].slice(-50);
+        });
+        if (!isAlertsViewed) {
+          setUnreadAlertCount(prev => prev + 1);
+        }
+      }
+    } else {
+      if (currentAlert !== null) {
+        setCurrentAlert(null);
+      }
+    }
+  }, [currentAlert, isAlertsViewed]);
 
   useEffect(() => {
+    if (latest) {
+      updateAlertState(latest);
+    }
+  }, [latest, updateAlertState]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // ─── WEBSOCKET ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let isMounted = true;
+
     function connect() {
+      if (!isMounted) return;
+      
+      setWsStatus("connecting");
+      console.log("[WS] Connecting...");
+      
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
-      ws.onopen = () => setWsStatus("open");
-      ws.onclose = () => { setWsStatus("closed"); setTimeout(connect, 3000); };
-      ws.onerror = () => ws.close();
+
+      ws.onopen = () => {
+        if (isMounted) {
+          setWsStatus("open");
+          console.log("[WS] ✅ Connected");
+        }
+      };
+
+      ws.onclose = (event) => {
+        if (isMounted) {
+          setWsStatus("closed");
+          console.log("[WS] ❌ Disconnected (code:", event.code, ")");
+          
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+          }
+          reconnectTimeoutRef.current = setTimeout(() => {
+            console.log("[WS] 🔄 Reconnecting...");
+            connect();
+          }, 3000);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("[WS] ⚠️ Error:", err);
+      };
+
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.event !== "new_reading") return;
-          setPrev(prevRef.current);
-          setLatest(msg.data);
-          setHistory(h => [...h, msg.data].slice(-HISTORY_LIMIT));
-        } catch { }
+          
+          const newReading = msg.data;
+          if (!newReading || !newReading._id) return;
+          
+          setPrev(prevLatestRef.current);
+          setLatest(newReading);
+          
+          setHistory(prevHistory => {
+            const exists = prevHistory.some(h => h._id === newReading._id);
+            if (exists) return prevHistory;
+            const updated = [...prevHistory, newReading];
+            return updated.slice(-HISTORY_LIMIT);
+          });
+          
+        } catch (err) {
+          console.error("[WS] Parse error:", err);
+        }
       };
     }
+
     connect();
-    return () => wsRef.current?.close();
+
+    return () => {
+      isMounted = false;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
   }, []);
 
+  // ─── HEALTH CHECK ─────────────────────────────────────────────────────────
   useEffect(() => {
     const check = async () => {
       try {
         const res = await fetch(`${API_URL}/health`);
-        setServerInfo(await res.json());
-      } catch { setServerInfo(null); }
+        const data = await res.json();
+        setServerInfo(data);
+      } catch {
+        setServerInfo(null);
+      }
     };
     check();
     const id = setInterval(check, HEALTH_INTERVAL);
     return () => clearInterval(id);
   }, []);
 
+  const handleTabChange = (newTab) => {
+    setTab(newTab);
+    if (newTab === "alerts") {
+      setUnreadAlertCount(0);
+      setIsAlertsViewed(true);
+    } else {
+      setIsAlertsViewed(false);
+    }
+  };
+
+  const toggleTheme = () => {
+    setDarkMode(!darkMode);
+  };
+
   const qualityScore = latest ? computeQualityScore(latest) : 0;
   const qualityLevel = getQualityLevel(qualityScore);
 
-  const chartData = history.map(d => ({
+  // Deduplicate history by _id
+  const uniqueHistory = Array.from(
+    new Map(history.map(item => [item._id, item])).values()
+  );
+
+  const allAlerts = alertHistory;
+  const alertsCount = allAlerts.length;
+
+  // Sort by createdAt (newest first)
+  const sortedHistory = [...uniqueHistory].sort((a, b) => {
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+
+  const chartData = sortedHistory.map(d => ({
     time: formatTime(d.createdAt),
     ph: +d.ph,
     temperature: +d.temperature,
@@ -475,50 +755,85 @@ export default function App() {
     conductivity: +d.conductivity,
   }));
 
-  const alerts = history.filter(d => computeQualityScore(d) < 45);
   const delta = key => (latest && prev) ? latest[key] - prev[key] : undefined;
   const isConnected = wsStatus === "open";
 
   const pieData = [
-    { name: "Excellent/Good", value: history.filter(d => computeQualityScore(d) >= 65).length, color: "#2563eb" },
-    { name: "Fair", value: history.filter(d => { const s = computeQualityScore(d); return s >= 35 && s < 65; }).length, color: "#eab308" },
-    { name: "Poor/Critical", value: history.filter(d => computeQualityScore(d) < 35).length, color: "#ef4444" },
+    { name: "Excellent/Good", value: uniqueHistory.filter(d => computeQualityScore(d) >= 65).length, color: "#2563eb" },
+    { name: "Fair", value: uniqueHistory.filter(d => { const s = computeQualityScore(d); return s >= 35 && s < 65; }).length, color: "#eab308" },
+    { name: "Poor/Critical", value: uniqueHistory.filter(d => computeQualityScore(d) < 35).length, color: "#ef4444" },
   ].filter(d => d.value > 0);
 
+  // Apply theme
+  const theme = darkMode ? THEME.dark : THEME.light;
+
   return (
-    <div style={g.app}>
-      <header style={g.header}>
+    <div style={{ ...g.app, background: theme.background, color: theme.text }}>
+      <header style={{ ...g.header, background: theme.card, borderBottom: `1px solid ${theme.border}`, boxShadow: theme.shadow }}>
         <div style={g.logo}>
           <span style={g.logoIcon}>◈</span>
           <div>
-            <div style={g.logoTitle}>AquaSense</div>
+            <div style={{ ...g.logoTitle, color: theme.text }}>AquaSense</div>
             <div style={g.logoSub}>Water Quality Intelligence</div>
           </div>
         </div>
 
         <nav style={g.nav}>
           {["control", "dashboard", "history", "alerts"].map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              style={{ ...g.navBtn, ...(tab === t ? g.navBtnActive : {}) }}>
+            <button key={t} onClick={() => handleTabChange(t)}
+              style={{ ...g.navBtn, ...(tab === t ? g.navBtnActive : {}), color: tab === t ? "#2563eb" : theme.textMuted }}>
               {t === "dashboard" ? "Dashboard" : t === "control" ? "Control" : t === "history" ? "History" : "Alerts"}
-              {t === "alerts" && alerts.length > 0 &&
-                <span style={g.navBadge}>{alerts.length}</span>}
+              {t === "alerts" && unreadAlertCount > 0 &&
+                <span style={g.navBadge}>{unreadAlertCount}</span>}
             </button>
           ))}
         </nav>
 
         <div style={g.headerRight}>
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: 20,
+              cursor: "pointer",
+              padding: "4px 8px",
+              borderRadius: 4,
+            }}
+          >
+            {darkMode ? "☀️" : "🌙"}
+          </button>
+
+          {/* Export Button */}
+          <button
+            onClick={exportData}
+            style={{
+              background: "#2563eb",
+              color: "white",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 12,
+              fontFamily: "inherit"
+            }}
+          >
+            📥 Export
+          </button>
+
           <div style={{
             ...g.connDot,
             background: isConnected ? "#10b981" : "#ef4444",
             boxShadow: isConnected ? "0 0 8px #10b981" : "none"
           }} />
           <div>
-            <div style={g.connLabel}>
-              {wsStatus === "open" ? "Online" : wsStatus === "connecting" ? "Connecting…" : "Offline"}
+            <div style={{ ...g.connLabel, color: theme.textMuted }}>
+              {wsStatus === "open" ? "Online" : 
+               wsStatus === "connecting" ? "Connecting…" : "Offline"}
             </div>
             {serverInfo && (
-              <div style={g.connTime}>
+              <div style={{ ...g.connTime, color: theme.textMuted }}>
                 DB {serverInfo.mongo === "connected" ? "✓" : "✗"}
                 {" · "}
                 MQTT {serverInfo.mqtt === "connected" ? "✓" : "✗"}
@@ -531,22 +846,22 @@ export default function App() {
       {/* CONTROL TAB */}
       {tab === "control" && (
         <main style={g.main}>
-          <div style={{ ...g.section, textAlign: "center" }}>
+          <div style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
             <div style={g.sectionTitle}>Boat Control — Joystick</div>
             <div style={{ padding: "20px 0" }}>
               <Joystick onMove={handleJoystickMove} onStop={handleJoystickStop} />
-              <div style={{ marginTop: 20, padding: 15, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
-                <div style={{ fontSize: 14, color: "#475569", marginBottom: 10 }}>Current Command</div>
+              <div style={{ marginTop: 20, padding: 15, background: theme.tableStripe, borderRadius: 10, border: `1px solid ${theme.border}` }}>
+                <div style={{ fontSize: 14, color: theme.textMuted, marginBottom: 10 }}>Current Command</div>
                 <div style={{ display: "flex", justifyContent: "center", gap: 30 }}>
                   <div>
-                    <span style={{ color: "#64748b" }}>Forward/Back:</span>
+                    <span style={{ color: theme.textMuted }}>Forward/Back:</span>
                     <span style={{ fontWeight: 700, color: "#2563eb", marginLeft: 8 }}>
                       {joystickCommand.forward > 0 ? `Forward ${Math.round(joystickCommand.forward)}%` : 
                        joystickCommand.forward < 0 ? `Backward ${Math.round(Math.abs(joystickCommand.forward))}%` : "Stop"}
                     </span>
                   </div>
                   <div>
-                    <span style={{ color: "#64748b" }}>Turn:</span>
+                    <span style={{ color: theme.textMuted }}>Turn:</span>
                     <span style={{ fontWeight: 700, color: "#2563eb", marginLeft: 8 }}>
                       {joystickCommand.turn > 0 ? `Right ${Math.round(joystickCommand.turn)}%` : 
                        joystickCommand.turn < 0 ? `Left ${Math.round(Math.abs(joystickCommand.turn))}%` : "Straight"}
@@ -563,8 +878,8 @@ export default function App() {
       {tab === "dashboard" && (
         <main style={g.main}>
           <div style={g.topRow}>
-            <section style={{ ...g.section, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 180 }}>
-              <div style={{ ...g.sectionTitle, marginBottom: 8 }}>Water Quality Score</div>
+            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 180 }}>
+              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Water Quality Score</div>
               <QualityRing score={qualityScore} />
             </section>
 
@@ -585,7 +900,17 @@ export default function App() {
                       : "Waiting for data…"}
                   </div>
                 </div>
-                <AlertBadge count={alerts.length} />
+                <AlertBadge count={currentAlert ? 1 : 0} />
+                {currentAlert && (
+                  <span style={{
+                    ...g.alertBadge,
+                    background: currentAlert.level.color + "20",
+                    color: currentAlert.level.color,
+                    border: `1px solid ${currentAlert.level.color}40`
+                  }}>
+                    ⚠️ {currentAlert.level.label}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -601,8 +926,8 @@ export default function App() {
             })}
           </div>
 
-          <section style={g.section}>
-            <div style={g.sectionTitle}>Live Sensors</div>
+          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
+            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Live Sensors</div>
             <div style={g.gaugesRow}>
               {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(key => {
                 const meta = THRESHOLDS[key];
@@ -617,16 +942,16 @@ export default function App() {
             </div>
           </section>
 
-          <section style={g.section}>
+          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
             <div style={g.sectionHeader}>
-              <div style={g.sectionTitle}>Time Series</div>
+              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Time Series</div>
               <div style={g.paramTabs}>
                 {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(key => (
                   <button key={key} onClick={() => setActiveParam(key)}
                     style={{
                       ...g.paramTab,
                       background: activeParam === key ? COLORS[key] + "25" : "transparent",
-                      color: activeParam === key ? COLORS[key] : "#64748b",
+                      color: activeParam === key ? COLORS[key] : theme.textMuted,
                       borderColor: activeParam === key ? COLORS[key] : "transparent",
                     }}>
                     {THRESHOLDS[key].label}
@@ -642,9 +967,9 @@ export default function App() {
                     <stop offset="95%" stopColor={COLORS[activeParam]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
-                <XAxis dataKey="time" tick={{ fill: "#64748b", fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
+                <XAxis dataKey="time" tick={{ fill: theme.textMuted, fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: theme.textMuted, fontSize: 10 }} />
                 <Tooltip content={(props) => <ChartTooltip {...props} />} />
                 <Area type="monotone" dataKey={activeParam}
                   stroke={COLORS[activeParam]} fill="url(#areaGrad)"
@@ -654,12 +979,12 @@ export default function App() {
           </section>
 
           <div style={g.bottomRow}>
-            <section style={{ ...g.section, flex: 2 }}>
-              <div style={g.sectionTitle}>Parameter Statistics (last {history.length} readings)</div>
-              <StatsPanel history={history} />
+            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, flex: 2 }}>
+              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Parameter Statistics (last {uniqueHistory.length} readings)</div>
+              <StatsPanel history={uniqueHistory} />
             </section>
-            <section style={{ ...g.section, flex: 1, minWidth: 200 }}>
-              <div style={g.sectionTitle}>Quality Distribution</div>
+            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, flex: 1, minWidth: 200 }}>
+              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Quality Distribution</div>
               <ResponsiveContainer width="100%" height={180}>
                 <PieChart>
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={75}
@@ -676,7 +1001,7 @@ export default function App() {
                 {pieData.map(d => (
                   <div key={d.name} style={g.pieLegendItem}>
                     <div style={{ ...g.legendDot, background: d.color }} />
-                    <span style={{ color: "#64748b", fontSize: 12 }}>{d.name}</span>
+                    <span style={{ color: theme.textMuted, fontSize: 12 }}>{d.name}</span>
                     <span style={{ color: d.color, fontWeight: 700, marginLeft: "auto" }}>{d.value}</span>
                   </div>
                 ))}
@@ -689,38 +1014,42 @@ export default function App() {
       {/* HISTORY TAB */}
       {tab === "history" && (
         <main style={g.main}>
-          <section style={g.section}>
-            <div style={g.sectionTitle}>
-              Measurement History ({history.length} entries)
+          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
+            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>
+              Measurement History ({uniqueHistory.length} entries)
             </div>
             <div style={g.tableWrap}>
-              <table style={g.table}>
+              <table style={{ ...g.table, color: theme.text }}>
                 <thead>
                   <tr>
-                    <th style={g.th}>Time</th>
-                    <th style={g.th}>pH</th><th style={g.th}>Temp.</th>
-                    <th style={g.th}>Turbidity</th><th style={g.th}>Dissolved O₂</th>
-                    <th style={g.th}>Conductivity</th>
-                    <th style={g.th}>Score</th>
-                    <th style={g.th}>Quality</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Time</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>pH</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Temp.</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Turbidity</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Dissolved O₂</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Conductivity</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Score</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Quality</th>
+                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Alert</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...history].reverse().map((d, i) => {
+                  {sortedHistory.map((d) => {
                     const score = computeQualityScore(d);
                     const level = getQualityLevel(score);
+                    const isAlert = score < ALERT_THRESHOLD;
                     return (
-                      <tr key={d._id || i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#ffffff" }}>
-                        <td style={g.td}>{formatTime(d.createdAt)}</td>
+                      <tr key={d._id} style={{ background: d._id % 2 === 0 ? theme.tableStripe : theme.card }}>
+                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>{formatTime(d.createdAt)}</td>
                         {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(k => (
-                          <td key={k} style={{ ...g.td, color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])] }}>
+                          <td key={k} style={{ ...g.td, color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], borderBottom: `1px solid ${theme.border}` }}>
                             {Number(d[k]).toFixed(2)}{THRESHOLDS[k].unit}
                           </td>
                         ))}
-                        <td style={{ ...g.td, color: level.color, fontWeight: 700 }}>
+                        <td style={{ ...g.td, color: level.color, fontWeight: 700, borderBottom: `1px solid ${theme.border}` }}>
                           {score}%
                         </td>
-                        <td style={g.td}>
+                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>
                           <span style={{
                             ...g.badge,
                             background: level.color + "20",
@@ -729,6 +1058,20 @@ export default function App() {
                           }}>
                             {level.label}
                           </span>
+                        </td>
+                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>
+                          {isAlert ? (
+                            <span style={{
+                              ...g.badge,
+                              background: "#ef444420",
+                              color: "#ef4444",
+                              border: "1px solid #ef444440"
+                            }}>
+                              ⚠️ Alert
+                            </span>
+                          ) : (
+                            <span style={{ color: theme.textMuted, fontSize: 11 }}>—</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -743,100 +1086,138 @@ export default function App() {
       {/* ALERTS TAB */}
       {tab === "alerts" && (
         <main style={g.main}>
-          <section style={g.section}>
-            <div style={g.sectionTitle}>
+          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
+            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>
               Alert Log
-              <span style={{ ...g.alertBadge2, marginLeft: 12 }}>{alerts.length}</span>
+              <span style={{ ...g.alertBadge2, marginLeft: 12 }}>{alertsCount}</span>
             </div>
-            {alerts.length === 0 ? (
-              <div style={g.emptyState}>
+            {alertsCount === 0 ? (
+              <div style={{ ...g.emptyState, color: theme.textMuted }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>✓</div>
                 <div style={{ color: "#10b981", fontWeight: 700 }}>No Alerts</div>
-                <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>
+                <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
                   All readings are above 45% quality score
                 </div>
               </div>
             ) : (
-              [...alerts].reverse().map((d, i) => {
-                const score = computeQualityScore(d);
-                const level = getQualityLevel(score);
-                const offenders = ["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"]
-                  .filter(k => getParamStatus(k, d[k]) !== "good");
-                return (
-                  <div key={d._id || i} style={{ ...g.alertCard, borderLeft: `4px solid ${level.color}` }}>
-                    <div style={g.alertHeader}>
-                      <span style={{ ...g.badge, background: level.color + "20", color: level.color }}>
-                        {level.label} — {score}%
-                      </span>
-                      <span style={{ color: "#64748b", fontSize: 13 }}>
-                        {formatDate(d.createdAt)} — {formatTime(d.createdAt)}
-                      </span>
+              [...allAlerts]
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .map((alert) => {
+                  const d = alert.reading;
+                  const level = alert.level;
+                  return (
+                    <div key={alert.id} style={{ ...g.alertCard, background: theme.card, borderColor: theme.border, borderLeft: `4px solid ${level.color}` }}>
+                      <div style={g.alertHeader}>
+                        <span style={{ ...g.badge, background: level.color + "20", color: level.color }}>
+                          {level.label} — {alert.score}%
+                        </span>
+                        <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                          {formatDate(alert.timestamp)} — {formatTime(alert.timestamp)}
+                        </span>
+                      </div>
+                      <div style={g.alertParams}>
+                        {alert.offenders.map(k => (
+                          <div key={k} style={{ ...g.alertParam, color: theme.text }}>
+                            <span style={{ color: theme.textMuted }}>{THRESHOLDS[k].label}:</span>
+                            <span style={{ color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], fontWeight: 700, marginLeft: 6 }}>
+                              {Number(d[k]).toFixed(2)}{THRESHOLDS[k].unit}
+                            </span>
+                            <span style={{ color: theme.textMuted, fontSize: 11, marginLeft: 4 }}>
+                              (range: {THRESHOLDS[k].min}–{THRESHOLDS[k].max})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div style={g.alertParams}>
-                      {offenders.map(k => (
-                        <div key={k} style={g.alertParam}>
-                          <span style={{ color: "#64748b" }}>{THRESHOLDS[k].label}:</span>
-                          <span style={{ color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], fontWeight: 700, marginLeft: 6 }}>
-                            {Number(d[k]).toFixed(2)}{THRESHOLDS[k].unit}
-                          </span>
-                          <span style={{ color: "#94a3b8", fontSize: 11, marginLeft: 4 }}>
-                            (range: {THRESHOLDS[k].min}–{THRESHOLDS[k].max})
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })
+                  );
+                })
             )}
           </section>
         </main>
       )}
 
-      <footer style={g.footer}>
+      <footer style={{ ...g.footer, background: theme.card, borderTop: `1px solid ${theme.border}`, color: theme.textMuted }}>
         <span>AquaSense IoT Platform</span>
-        <span style={{ color: "#cbd5e1" }}>·</span>
+        <span style={{ color: theme.border }}>·</span>
         <span>WebSocket {isConnected ? "🟢" : "🔴"}</span>
         {serverInfo && <>
-          <span style={{ color: "#cbd5e1" }}>·</span>
+          <span style={{ color: theme.border }}>·</span>
           <span>Uptime: {Math.floor(serverInfo.uptime / 60)}m</span>
         </>}
-        <span style={{ color: "#cbd5e1" }}>·</span>
+        <span style={{ color: theme.border }}>·</span>
         <span>Forward: {Math.round(joystickCommand.forward)}% | Turn: {Math.round(joystickCommand.turn)}%</span>
+        <span style={{ color: theme.border }}>·</span>
+        <button
+          onClick={exportData}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: theme.textMuted,
+            cursor: "pointer",
+            fontSize: 12,
+            fontFamily: "inherit",
+            textDecoration: "underline"
+          }}
+        >
+          Export Data
+        </button>
       </footer>
     </div>
   );
 }
 
+// ─── MAIN APP WITH ERROR BOUNDARY ──────────────────────────────────────────
+export default function App() {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Simulate initial loading (or wait for data)
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
 // ─── STYLES ────────────────────────────────────────────────────────────────
 const g = {
-  app: { fontFamily: "'DM Mono','Fira Code','Courier New',monospace", background: "#bde0f7", minHeight: "100vh", color: "#1e293b", display: "flex", flexDirection: "column" },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 64, borderBottom: "1px solid #e2e8f0", background: "#ffffff", position: "sticky", top: 0, zIndex: 100, gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" },
+  app: { fontFamily: "'DM Mono','Fira Code','Courier New',monospace", minHeight: "100vh", display: "flex", flexDirection: "column" },
+  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 64, borderBottom: "1px solid #e2e8f0", position: "sticky", top: 0, zIndex: 100, gap: 12 },
   headerRight: { display: "flex", alignItems: "center", gap: 10, flexShrink: 0 },
   logo: { display: "flex", alignItems: "center", gap: 12, flexShrink: 0 },
   logoIcon: { fontSize: 24, color: "#2563eb", lineHeight: 1 },
-  logoTitle: { fontSize: 16, fontWeight: 700, color: "#1e293b", letterSpacing: "0.05em" },
+  logoTitle: { fontSize: 16, fontWeight: 700, letterSpacing: "0.05em" },
   logoSub: { fontSize: 10, color: "#64748b", letterSpacing: "0.1em", textTransform: "uppercase" },
   nav: { display: "flex", gap: 4 },
-  navBtn: { background: "transparent", border: "none", color: "#64748b", padding: "6px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: "inherit", position: "relative", transition: "all 0.2s" },
+  navBtn: { background: "transparent", border: "none", padding: "6px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: "inherit", position: "relative", transition: "all 0.2s" },
   navBtnActive: { background: "#eff6ff", color: "#2563eb" },
   navBadge: { position: "absolute", top: 2, right: 2, background: "#ef4444", color: "white", borderRadius: 8, fontSize: 9, padding: "1px 5px", fontWeight: 700 },
   connDot: { width: 10, height: 10, borderRadius: "50%", flexShrink: 0 },
-  connLabel: { fontSize: 12, color: "#64748b" },
-  connTime: { fontSize: 10, color: "#94a3b8" },
+  connLabel: { fontSize: 12 },
+  connTime: { fontSize: 10 },
   main: { flex: 1, padding: "24px 28px", display: "flex", flexDirection: "column", gap: 20 },
   topRow: { display: "flex", gap: 16, flexWrap: "wrap" },
   ringWrap: { display: "flex", justifyContent: "center" },
+  ringBg: { stroke: "#cbd5e1" },
+  textMuted: { color: "#64748b" },
   banner: { borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 },
   alertBadge: { marginLeft: "auto", background: "#fee2e2", color: "#dc2626", padding: "4px 12px", borderRadius: 99, fontSize: 12, fontWeight: 700, border: "1px solid #fecaca" },
   statsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12 },
-  statCard: { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
+  statCard: { border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
   statLabel: { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em" },
   statVal: { fontSize: 22, fontWeight: 700, margin: "4px 0 0" },
   statUnit: { fontSize: 12, fontWeight: 400, marginLeft: 2 },
   statDelta: { fontSize: 11, marginTop: 3 },
   paramStatusBadge: { display: "inline-block", marginTop: 6, padding: "2px 8px", borderRadius: 99, fontSize: 10, fontWeight: 600 },
-  section: { background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
+  section: { border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px" },
   sectionHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 },
   sectionTitle: { fontSize: 13, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 16 },
   paramTabs: { display: "flex", gap: 6, flexWrap: "wrap" },
@@ -847,7 +1228,7 @@ const g = {
   gaugeLabel: { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 2 },
   bottomRow: { display: "flex", gap: 16, flexWrap: "wrap" },
   statsPanel: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 },
-  statsPanelCard: { background: "#f8fafc", borderRadius: 10, padding: "12px 14px" },
+  statsPanelCard: { borderRadius: 10, padding: "12px 14px" },
   statsPanelLabel: { fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 },
   statsPanelRow: { display: "flex", justifyContent: "space-between", marginBottom: 10 },
   statsPanelItem: { textAlign: "center", flex: 1 },
@@ -871,6 +1252,6 @@ const g = {
   alertParams: { display: "flex", flexDirection: "column", gap: 4 },
   alertParam: { fontSize: 13 },
   alertBadge2: { background: "#fee2e2", color: "#dc2626", padding: "2px 10px", borderRadius: 99, fontSize: 12, fontWeight: 700 },
-  emptyState: { textAlign: "center", padding: "48px 0", color: "#64748b" },
-  footer: { padding: "14px 28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: 12, fontSize: 12, color: "#64748b", background: "#ffffff", flexWrap: "wrap" },
+  emptyState: { textAlign: "center", padding: "48px 0" },
+  footer: { padding: "14px 28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: 12, fontSize: 12, flexWrap: "wrap", alignItems: "center" },
 };
