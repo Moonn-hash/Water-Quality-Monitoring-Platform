@@ -41,28 +41,16 @@ const COLORS = {
   conductivity:   "#fbbf24",
 };
 
-// ─── THEME ──────────────────────────────────────────────────────────────────
+// ─── THEME (WHITE MODE ONLY) ────────────────────────────────────────────────
 const THEME = {
-  light: {
-    background: "#f0f9ff",
-    card: "#ffffff",
-    text: "#1e293b",
-    textMuted: "#64748b",
-    border: "#e2e8f0",
-    ringBg: "#cbd5e1",
-    tableStripe: "#f8fafc",
-    shadow: "0 1px 3px rgba(0,0,0,0.05)",
-  },
-  dark: {
-    background: "#0f172a",
-    card: "#1e293b",
-    text: "#e2e8f0",
-    textMuted: "#94a3b8",
-    border: "#334155",
-    ringBg: "#475569",
-    tableStripe: "#1e293b",
-    shadow: "0 1px 3px rgba(0,0,0,0.3)",
-  }
+  background: "#f0f9ff",
+  card: "#ffffff",
+  text: "#1e293b",
+  textMuted: "#64748b",
+  border: "#e2e8f0",
+  ringBg: "#cbd5e1",
+  tableStripe: "#f8fafc",
+  shadow: "0 1px 3px rgba(0,0,0,0.05)",
 };
 
 function computeQualityScore(reading) {
@@ -347,7 +335,7 @@ function QualityRing({ score }) {
   return (
     <div style={g.ringWrap}>
       <svg width="140" height="140" viewBox="0 0 140 140">
-        <circle cx="70" cy="70" r={radius} fill="none" stroke={g.ringBg} strokeWidth="12" />
+        <circle cx="70" cy="70" r={radius} fill="none" stroke="#cbd5e1" strokeWidth="12" />
         <circle cx="70" cy="70" r={radius} fill="none"
           stroke={level.color} strokeWidth="12" strokeLinecap="round"
           strokeDasharray={circ} strokeDashoffset={dashOffset}
@@ -357,7 +345,7 @@ function QualityRing({ score }) {
           fontSize="28" fontWeight="700" fontFamily="monospace">
           {score}%
         </text>
-        <text x="70" y="82" textAnchor="middle" fill={g.textMuted}
+        <text x="70" y="82" textAnchor="middle" fill="#64748b"
           fontSize="11" fontFamily="monospace">
           {level.label}
         </text>
@@ -374,7 +362,7 @@ function Gauge({ value, min, max, unit, label, colorKey }) {
   return (
     <div style={g.gaugeWrap}>
       <svg viewBox="0 0 120 80" style={{ width: "100%", overflow: "visible" }}>
-        <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke={g.ringBg} strokeWidth="8" strokeLinecap="round" />
+        <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke="#cbd5e1" strokeWidth="8" strokeLinecap="round" />
         <path d="M 15 75 A 50 50 0 1 1 105 75" fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
           strokeDasharray={`${pct * 219.9} 219.9`} style={{ filter: `drop-shadow(0 0 6px ${color})` }} />
         <g transform={`translate(60,65) rotate(${angle})`}>
@@ -413,7 +401,7 @@ function StatCard({ label, value, unit, delta, paramKey }) {
         {status === "good" ? "✓ Good" : status === "fair" ? "~ Fair" : "✗ Critical"}
       </div>
       {optimal !== null && (
-        <div style={{ fontSize: 10, color: g.textMuted, marginTop: 4 }}>
+        <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>
           Optimal: {optimal}{unit}
         </div>
       )}
@@ -457,7 +445,7 @@ function StatsPanel({ history }) {
             </div>
             <div style={g.statsPanelRange}>
               <span>{meta.min}{meta.unit}</span>
-              <span style={{ color: g.textMuted, fontSize: 10 }}>safe range</span>
+              <span style={{ color: "#94a3b8", fontSize: 10 }}>safe range</span>
               <span>{meta.max}{meta.unit}</span>
             </div>
           </div>
@@ -497,7 +485,6 @@ function AppContent() {
   const [activeParam, setActiveParam] = useState("ph");
   const [tab, setTab] = useState("dashboard");
   const [joystickCommand, setJoystickCommand] = useState({ forward: 0, turn: 0 });
-  const [darkMode, setDarkMode] = useState(false);
   
   // ─── DYNAMIC ALERTS ──────────────────────────────────────────────────────
   const [currentAlert, setCurrentAlert] = useState(null);
@@ -532,34 +519,6 @@ function AppContent() {
     setJoystickCommand({ forward: 0, turn: 0 });
     sendBoatCommand({ forward: 0, turn: 0 });
   };
-
-  // ─── EXPORT DATA ──────────────────────────────────────────────────────────
-  const exportData = useCallback(() => {
-    if (uniqueHistory.length === 0) {
-      alert("No data to export");
-      return;
-    }
-    
-    const data = uniqueHistory.map(d => ({
-      timestamp: d.createdAt,
-      ph: d.ph,
-      temperature: d.temperature,
-      turbidity: d.turbidity,
-      dissolvedOxygen: d.dissolvedOxygen,
-      conductivity: d.conductivity,
-      score: computeQualityScore(d),
-      status: getParamStatus(d, d.ph) // simplified
-    }));
-    
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `aquasense-data-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [history]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -726,10 +685,6 @@ function AppContent() {
     }
   };
 
-  const toggleTheme = () => {
-    setDarkMode(!darkMode);
-  };
-
   const qualityScore = latest ? computeQualityScore(latest) : 0;
   const qualityLevel = getQualityLevel(qualityScore);
 
@@ -764,16 +719,13 @@ function AppContent() {
     { name: "Poor/Critical", value: uniqueHistory.filter(d => computeQualityScore(d) < 35).length, color: "#ef4444" },
   ].filter(d => d.value > 0);
 
-  // Apply theme
-  const theme = darkMode ? THEME.dark : THEME.light;
-
   return (
-    <div style={{ ...g.app, background: theme.background, color: theme.text }}>
-      <header style={{ ...g.header, background: theme.card, borderBottom: `1px solid ${theme.border}`, boxShadow: theme.shadow }}>
+    <div style={{ ...g.app, background: THEME.background, color: THEME.text }}>
+      <header style={{ ...g.header, background: THEME.card, borderBottom: `1px solid ${THEME.border}`, boxShadow: THEME.shadow }}>
         <div style={g.logo}>
           <span style={g.logoIcon}>◈</span>
           <div>
-            <div style={{ ...g.logoTitle, color: theme.text }}>AquaSense</div>
+            <div style={{ ...g.logoTitle, color: THEME.text }}>AquaSense</div>
             <div style={g.logoSub}>Water Quality Intelligence</div>
           </div>
         </div>
@@ -781,7 +733,7 @@ function AppContent() {
         <nav style={g.nav}>
           {["control", "dashboard", "history", "alerts"].map(t => (
             <button key={t} onClick={() => handleTabChange(t)}
-              style={{ ...g.navBtn, ...(tab === t ? g.navBtnActive : {}), color: tab === t ? "#2563eb" : theme.textMuted }}>
+              style={{ ...g.navBtn, ...(tab === t ? g.navBtnActive : {}), color: tab === t ? "#2563eb" : THEME.textMuted }}>
               {t === "dashboard" ? "Dashboard" : t === "control" ? "Control" : t === "history" ? "History" : "Alerts"}
               {t === "alerts" && unreadAlertCount > 0 &&
                 <span style={g.navBadge}>{unreadAlertCount}</span>}
@@ -790,50 +742,18 @@ function AppContent() {
         </nav>
 
         <div style={g.headerRight}>
-          {/* Theme Toggle */}
-          <button
-            onClick={toggleTheme}
-            style={{
-              background: "transparent",
-              border: "none",
-              fontSize: 20,
-              cursor: "pointer",
-              padding: "4px 8px",
-              borderRadius: 4,
-            }}
-          >
-            {darkMode ? "☀️" : "🌙"}
-          </button>
-
-          {/* Export Button */}
-          <button
-            onClick={exportData}
-            style={{
-              background: "#2563eb",
-              color: "white",
-              border: "none",
-              padding: "6px 12px",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 12,
-              fontFamily: "inherit"
-            }}
-          >
-            📥 Export
-          </button>
-
           <div style={{
             ...g.connDot,
             background: isConnected ? "#10b981" : "#ef4444",
             boxShadow: isConnected ? "0 0 8px #10b981" : "none"
           }} />
           <div>
-            <div style={{ ...g.connLabel, color: theme.textMuted }}>
+            <div style={{ ...g.connLabel, color: THEME.textMuted }}>
               {wsStatus === "open" ? "Online" : 
                wsStatus === "connecting" ? "Connecting…" : "Offline"}
             </div>
             {serverInfo && (
-              <div style={{ ...g.connTime, color: theme.textMuted }}>
+              <div style={{ ...g.connTime, color: THEME.textMuted }}>
                 DB {serverInfo.mongo === "connected" ? "✓" : "✗"}
                 {" · "}
                 MQTT {serverInfo.mqtt === "connected" ? "✓" : "✗"}
@@ -846,22 +766,22 @@ function AppContent() {
       {/* CONTROL TAB */}
       {tab === "control" && (
         <main style={g.main}>
-          <div style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
+          <div style={{ ...g.section, background: THEME.card, borderColor: THEME.border }}>
             <div style={g.sectionTitle}>Boat Control — Joystick</div>
             <div style={{ padding: "20px 0" }}>
               <Joystick onMove={handleJoystickMove} onStop={handleJoystickStop} />
-              <div style={{ marginTop: 20, padding: 15, background: theme.tableStripe, borderRadius: 10, border: `1px solid ${theme.border}` }}>
-                <div style={{ fontSize: 14, color: theme.textMuted, marginBottom: 10 }}>Current Command</div>
+              <div style={{ marginTop: 20, padding: 15, background: THEME.tableStripe, borderRadius: 10, border: `1px solid ${THEME.border}` }}>
+                <div style={{ fontSize: 14, color: THEME.textMuted, marginBottom: 10 }}>Current Command</div>
                 <div style={{ display: "flex", justifyContent: "center", gap: 30 }}>
                   <div>
-                    <span style={{ color: theme.textMuted }}>Forward/Back:</span>
+                    <span style={{ color: THEME.textMuted }}>Forward/Back:</span>
                     <span style={{ fontWeight: 700, color: "#2563eb", marginLeft: 8 }}>
                       {joystickCommand.forward > 0 ? `Forward ${Math.round(joystickCommand.forward)}%` : 
                        joystickCommand.forward < 0 ? `Backward ${Math.round(Math.abs(joystickCommand.forward))}%` : "Stop"}
                     </span>
                   </div>
                   <div>
-                    <span style={{ color: theme.textMuted }}>Turn:</span>
+                    <span style={{ color: THEME.textMuted }}>Turn:</span>
                     <span style={{ fontWeight: 700, color: "#2563eb", marginLeft: 8 }}>
                       {joystickCommand.turn > 0 ? `Right ${Math.round(joystickCommand.turn)}%` : 
                        joystickCommand.turn < 0 ? `Left ${Math.round(Math.abs(joystickCommand.turn))}%` : "Straight"}
@@ -878,8 +798,8 @@ function AppContent() {
       {tab === "dashboard" && (
         <main style={g.main}>
           <div style={g.topRow}>
-            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 180 }}>
-              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Water Quality Score</div>
+            <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 180 }}>
+              <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>Water Quality Score</div>
               <QualityRing score={qualityScore} />
             </section>
 
@@ -926,8 +846,8 @@ function AppContent() {
             })}
           </div>
 
-          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
-            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Live Sensors</div>
+          <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border }}>
+            <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>Live Sensors</div>
             <div style={g.gaugesRow}>
               {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(key => {
                 const meta = THRESHOLDS[key];
@@ -942,16 +862,16 @@ function AppContent() {
             </div>
           </section>
 
-          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
+          <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border }}>
             <div style={g.sectionHeader}>
-              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Time Series</div>
+              <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>Time Series</div>
               <div style={g.paramTabs}>
                 {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(key => (
                   <button key={key} onClick={() => setActiveParam(key)}
                     style={{
                       ...g.paramTab,
                       background: activeParam === key ? COLORS[key] + "25" : "transparent",
-                      color: activeParam === key ? COLORS[key] : theme.textMuted,
+                      color: activeParam === key ? COLORS[key] : THEME.textMuted,
                       borderColor: activeParam === key ? COLORS[key] : "transparent",
                     }}>
                     {THRESHOLDS[key].label}
@@ -967,9 +887,9 @@ function AppContent() {
                     <stop offset="95%" stopColor={COLORS[activeParam]} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={theme.border} />
-                <XAxis dataKey="time" tick={{ fill: theme.textMuted, fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: theme.textMuted, fontSize: 10 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={THEME.border} />
+                <XAxis dataKey="time" tick={{ fill: THEME.textMuted, fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis tick={{ fill: THEME.textMuted, fontSize: 10 }} />
                 <Tooltip content={(props) => <ChartTooltip {...props} />} />
                 <Area type="monotone" dataKey={activeParam}
                   stroke={COLORS[activeParam]} fill="url(#areaGrad)"
@@ -979,12 +899,12 @@ function AppContent() {
           </section>
 
           <div style={g.bottomRow}>
-            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, flex: 2 }}>
-              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Parameter Statistics (last {uniqueHistory.length} readings)</div>
+            <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border, flex: 2 }}>
+              <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>Parameter Statistics (last {uniqueHistory.length} readings)</div>
               <StatsPanel history={uniqueHistory} />
             </section>
-            <section style={{ ...g.section, background: theme.card, borderColor: theme.border, flex: 1, minWidth: 200 }}>
-              <div style={{ ...g.sectionTitle, color: theme.textMuted }}>Quality Distribution</div>
+            <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border, flex: 1, minWidth: 200 }}>
+              <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>Quality Distribution</div>
               <ResponsiveContainer width="100%" height={180}>
                 <PieChart>
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={75}
@@ -1001,7 +921,7 @@ function AppContent() {
                 {pieData.map(d => (
                   <div key={d.name} style={g.pieLegendItem}>
                     <div style={{ ...g.legendDot, background: d.color }} />
-                    <span style={{ color: theme.textMuted, fontSize: 12 }}>{d.name}</span>
+                    <span style={{ color: THEME.textMuted, fontSize: 12 }}>{d.name}</span>
                     <span style={{ color: d.color, fontWeight: 700, marginLeft: "auto" }}>{d.value}</span>
                   </div>
                 ))}
@@ -1014,23 +934,23 @@ function AppContent() {
       {/* HISTORY TAB */}
       {tab === "history" && (
         <main style={g.main}>
-          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
-            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>
+          <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border }}>
+            <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>
               Measurement History ({uniqueHistory.length} entries)
             </div>
             <div style={g.tableWrap}>
-              <table style={{ ...g.table, color: theme.text }}>
+              <table style={{ ...g.table, color: THEME.text }}>
                 <thead>
                   <tr>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Time</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>pH</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Temp.</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Turbidity</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Dissolved O₂</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Conductivity</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Score</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Quality</th>
-                    <th style={{ ...g.th, color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>Alert</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Time</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>pH</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Temp.</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Turbidity</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Dissolved O₂</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Conductivity</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Score</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Quality</th>
+                    <th style={{ ...g.th, color: THEME.textMuted, borderBottom: `1px solid ${THEME.border}` }}>Alert</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1039,17 +959,17 @@ function AppContent() {
                     const level = getQualityLevel(score);
                     const isAlert = score < ALERT_THRESHOLD;
                     return (
-                      <tr key={d._id} style={{ background: d._id % 2 === 0 ? theme.tableStripe : theme.card }}>
-                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>{formatTime(d.createdAt)}</td>
+                      <tr key={d._id} style={{ background: d._id % 2 === 0 ? THEME.tableStripe : THEME.card }}>
+                        <td style={{ ...g.td, color: THEME.text, borderBottom: `1px solid ${THEME.border}` }}>{formatTime(d.createdAt)}</td>
                         {["ph", "temperature", "turbidity", "dissolvedOxygen", "conductivity"].map(k => (
-                          <td key={k} style={{ ...g.td, color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], borderBottom: `1px solid ${theme.border}` }}>
+                          <td key={k} style={{ ...g.td, color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], borderBottom: `1px solid ${THEME.border}` }}>
                             {Number(d[k]).toFixed(2)}{THRESHOLDS[k].unit}
                           </td>
                         ))}
-                        <td style={{ ...g.td, color: level.color, fontWeight: 700, borderBottom: `1px solid ${theme.border}` }}>
+                        <td style={{ ...g.td, color: level.color, fontWeight: 700, borderBottom: `1px solid ${THEME.border}` }}>
                           {score}%
                         </td>
-                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>
+                        <td style={{ ...g.td, color: THEME.text, borderBottom: `1px solid ${THEME.border}` }}>
                           <span style={{
                             ...g.badge,
                             background: level.color + "20",
@@ -1059,7 +979,7 @@ function AppContent() {
                             {level.label}
                           </span>
                         </td>
-                        <td style={{ ...g.td, color: theme.text, borderBottom: `1px solid ${theme.border}` }}>
+                        <td style={{ ...g.td, color: THEME.text, borderBottom: `1px solid ${THEME.border}` }}>
                           {isAlert ? (
                             <span style={{
                               ...g.badge,
@@ -1070,7 +990,7 @@ function AppContent() {
                               ⚠️ Alert
                             </span>
                           ) : (
-                            <span style={{ color: theme.textMuted, fontSize: 11 }}>—</span>
+                            <span style={{ color: THEME.textMuted, fontSize: 11 }}>—</span>
                           )}
                         </td>
                       </tr>
@@ -1086,16 +1006,16 @@ function AppContent() {
       {/* ALERTS TAB */}
       {tab === "alerts" && (
         <main style={g.main}>
-          <section style={{ ...g.section, background: theme.card, borderColor: theme.border }}>
-            <div style={{ ...g.sectionTitle, color: theme.textMuted }}>
+          <section style={{ ...g.section, background: THEME.card, borderColor: THEME.border }}>
+            <div style={{ ...g.sectionTitle, color: THEME.textMuted }}>
               Alert Log
               <span style={{ ...g.alertBadge2, marginLeft: 12 }}>{alertsCount}</span>
             </div>
             {alertsCount === 0 ? (
-              <div style={{ ...g.emptyState, color: theme.textMuted }}>
+              <div style={{ ...g.emptyState, color: THEME.textMuted }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>✓</div>
                 <div style={{ color: "#10b981", fontWeight: 700 }}>No Alerts</div>
-                <div style={{ color: theme.textMuted, fontSize: 13, marginTop: 4 }}>
+                <div style={{ color: THEME.textMuted, fontSize: 13, marginTop: 4 }}>
                   All readings are above 45% quality score
                 </div>
               </div>
@@ -1106,23 +1026,23 @@ function AppContent() {
                   const d = alert.reading;
                   const level = alert.level;
                   return (
-                    <div key={alert.id} style={{ ...g.alertCard, background: theme.card, borderColor: theme.border, borderLeft: `4px solid ${level.color}` }}>
+                    <div key={alert.id} style={{ ...g.alertCard, background: THEME.card, borderColor: THEME.border, borderLeft: `4px solid ${level.color}` }}>
                       <div style={g.alertHeader}>
                         <span style={{ ...g.badge, background: level.color + "20", color: level.color }}>
                           {level.label} — {alert.score}%
                         </span>
-                        <span style={{ color: theme.textMuted, fontSize: 13 }}>
+                        <span style={{ color: THEME.textMuted, fontSize: 13 }}>
                           {formatDate(alert.timestamp)} — {formatTime(alert.timestamp)}
                         </span>
                       </div>
                       <div style={g.alertParams}>
                         {alert.offenders.map(k => (
-                          <div key={k} style={{ ...g.alertParam, color: theme.text }}>
-                            <span style={{ color: theme.textMuted }}>{THRESHOLDS[k].label}:</span>
+                          <div key={k} style={{ ...g.alertParam, color: THEME.text }}>
+                            <span style={{ color: THEME.textMuted }}>{THRESHOLDS[k].label}:</span>
                             <span style={{ color: PARAM_STATUS_COLOR[getParamStatus(k, d[k])], fontWeight: 700, marginLeft: 6 }}>
                               {Number(d[k]).toFixed(2)}{THRESHOLDS[k].unit}
                             </span>
-                            <span style={{ color: theme.textMuted, fontSize: 11, marginLeft: 4 }}>
+                            <span style={{ color: THEME.textMuted, fontSize: 11, marginLeft: 4 }}>
                               (range: {THRESHOLDS[k].min}–{THRESHOLDS[k].max})
                             </span>
                           </div>
@@ -1136,31 +1056,16 @@ function AppContent() {
         </main>
       )}
 
-      <footer style={{ ...g.footer, background: theme.card, borderTop: `1px solid ${theme.border}`, color: theme.textMuted }}>
+      <footer style={{ ...g.footer, background: THEME.card, borderTop: `1px solid ${THEME.border}`, color: THEME.textMuted }}>
         <span>AquaSense IoT Platform</span>
-        <span style={{ color: theme.border }}>·</span>
+        <span style={{ color: THEME.border }}>·</span>
         <span>WebSocket {isConnected ? "🟢" : "🔴"}</span>
         {serverInfo && <>
-          <span style={{ color: theme.border }}>·</span>
+          <span style={{ color: THEME.border }}>·</span>
           <span>Uptime: {Math.floor(serverInfo.uptime / 60)}m</span>
         </>}
-        <span style={{ color: theme.border }}>·</span>
+        <span style={{ color: THEME.border }}>·</span>
         <span>Forward: {Math.round(joystickCommand.forward)}% | Turn: {Math.round(joystickCommand.turn)}%</span>
-        <span style={{ color: theme.border }}>·</span>
-        <button
-          onClick={exportData}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: theme.textMuted,
-            cursor: "pointer",
-            fontSize: 12,
-            fontFamily: "inherit",
-            textDecoration: "underline"
-          }}
-        >
-          Export Data
-        </button>
       </footer>
     </div>
   );
@@ -1171,7 +1076,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate initial loading (or wait for data)
     const timer = setTimeout(() => setLoading(false), 1000);
     return () => clearTimeout(timer);
   }, []);
@@ -1206,8 +1110,6 @@ const g = {
   main: { flex: 1, padding: "24px 28px", display: "flex", flexDirection: "column", gap: 20 },
   topRow: { display: "flex", gap: 16, flexWrap: "wrap" },
   ringWrap: { display: "flex", justifyContent: "center" },
-  ringBg: { stroke: "#cbd5e1" },
-  textMuted: { color: "#64748b" },
   banner: { borderRadius: 12, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 },
   alertBadge: { marginLeft: "auto", background: "#fee2e2", color: "#dc2626", padding: "4px 12px", borderRadius: 99, fontSize: 12, fontWeight: 700, border: "1px solid #fecaca" },
   statsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 12 },
