@@ -5,8 +5,8 @@ import {
 } from "recharts";
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
-const API_URL         = "http://localhost:3000";
-const WS_URL          = "ws://localhost:3000";
+const API_URL         = "http://192.168.137.246:3000";
+const WS_URL          = "ws://192.168.137.246:3000";
 const HISTORY_LIMIT   = 40;
 const HEALTH_INTERVAL = 15000;
 const ALERT_THRESHOLD = 45;
@@ -119,20 +119,13 @@ const PARAM_STATUS_COLOR = {
 function LoadingSpinner() {
   return (
     <div style={{
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      minHeight: "100vh",
-      flexDirection: "column",
-      gap: "16px",
+      display: "flex", justifyContent: "center", alignItems: "center",
+      minHeight: "100vh", flexDirection: "column", gap: "16px",
       background: "#f0f9ff"
     }}>
       <div style={{
-        width: 48,
-        height: 48,
-        border: "4px solid #e2e8f0",
-        borderTop: "4px solid #2563eb",
-        borderRadius: "50%",
+        width: 48, height: 48, border: "4px solid #e2e8f0",
+        borderTop: "4px solid #2563eb", borderRadius: "50%",
         animation: "spin 1s linear infinite"
       }} />
       <style>{`
@@ -152,28 +145,19 @@ class ErrorBoundary extends React.Component {
     super(props);
     this.state = { hasError: false, error: null };
   }
-
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
-
   componentDidCatch(error, errorInfo) {
     console.error("App Error:", error, errorInfo);
   }
-
   render() {
     if (this.state.hasError) {
       return (
         <div style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "100vh",
-          flexDirection: "column",
-          gap: "12px",
-          padding: "20px",
-          textAlign: "center",
-          background: "#f0f9ff"
+          display: "flex", justifyContent: "center", alignItems: "center",
+          minHeight: "100vh", flexDirection: "column", gap: "12px",
+          padding: "20px", textAlign: "center", background: "#f0f9ff"
         }}>
           <div style={{ fontSize: 48 }}>⚠️</div>
           <h2 style={{ color: "#1e293b" }}>Something went wrong</h2>
@@ -181,13 +165,8 @@ class ErrorBoundary extends React.Component {
           <button
             onClick={() => window.location.reload()}
             style={{
-              padding: "10px 24px",
-              background: "#2563eb",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 14
+              padding: "10px 24px", background: "#2563eb", color: "white",
+              border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14
             }}
           >
             Refresh Page
@@ -199,7 +178,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// ─── JOYSTICK ──────────────────────────────────────────────────────────────
+// ─── JOYSTICK (4-DIRECTION ONLY) ───────────────────────────────────────────
 function Joystick({ onMove, onStop }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [active, setActive] = useState(false);
@@ -230,17 +209,31 @@ function Joystick({ onMove, onStop }) {
     let dy = clientY - centerY;
     
     const maxDist = rect.width / 2 - 30;
-    const distance = Math.sqrt(dx * dx + dy * dy);
     
-    if (distance > maxDist) {
-      dx = dx * (maxDist / distance);
-      dy = dy * (maxDist / distance);
+    // ─── SNAP TO 4 DIRECTIONS ───
+    let forward = 0;
+    let turn = 0;
+    
+    if (Math.abs(dx) > Math.abs(dy)) {
+      // Horizontal
+      dx = Math.max(-maxDist, Math.min(maxDist, dx));
+      dy = 0;
+      turn = Math.max(-100, Math.min(100, (dx / maxDist) * 100));
+      forward = 0;
+    } else {
+      // Vertical
+      dy = Math.max(-maxDist, Math.min(maxDist, dy));
+      dx = 0;
+      forward = Math.max(-100, Math.min(100, -(dy / maxDist) * 100));
+      turn = 0;
     }
     
-    setPosition({ x: dx, y: dy });
+    // Deadzone
+    const DEADZONE = 15;
+    if (Math.abs(forward) < DEADZONE) forward = 0;
+    if (Math.abs(turn) < DEADZONE) turn = 0;
     
-    const forward = Math.max(-100, Math.min(100, -(dy / maxDist) * 100));
-    const turn = Math.max(-100, Math.min(100, (dx / maxDist) * 100));
+    setPosition({ x: dx, y: dy });
     
     if (onMove) onMove({ forward, turn });
   };
@@ -274,6 +267,8 @@ function Joystick({ onMove, onStop }) {
         onMouseDown={handleStart}
         onTouchStart={handleStart}
       >
+        <div style={joystickStyles.guideH} />
+        <div style={joystickStyles.guideV} />
         <div 
           style={{
             ...joystickStyles.stick,
@@ -297,32 +292,33 @@ function Joystick({ onMove, onStop }) {
 const joystickStyles = {
   container: { display: "flex", flexDirection: "column", alignItems: "center", gap: 16 },
   base: {
-    width: 200,
-    height: 200,
+    width: 200, height: 200,
     backgroundColor: "#e2e8f0",
     borderRadius: "50%",
     boxShadow: "inset 0 0 10px rgba(0,0,0,0.1), 0 5px 15px rgba(0,0,0,0.2)",
-    position: "relative",
-    cursor: "pointer",
-    touchAction: "none",
+    position: "relative", cursor: "pointer", touchAction: "none",
+    overflow: "hidden",
+  },
+  guideH: {
+    position: "absolute", top: "50%", left: "10%", right: "10%",
+    height: 1, backgroundColor: "#cbd5e1",
+    transform: "translateY(-50%)", pointerEvents: "none",
+  },
+  guideV: {
+    position: "absolute", left: "50%", top: "10%", bottom: "10%",
+    width: 1, backgroundColor: "#cbd5e1",
+    transform: "translateX(-50%)", pointerEvents: "none",
   },
   stick: {
-    width: 60,
-    height: 60,
+    width: 60, height: 60,
     backgroundColor: "#2563eb",
     borderRadius: "50%",
-    position: "absolute",
-    top: "50%",
-    left: "50%",
+    position: "absolute", top: "50%", left: "50%",
     boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
     transition: "transform 0.05s linear",
-    cursor: "pointer",
+    cursor: "pointer", zIndex: 2,
   },
-  labels: {
-    textAlign: "center",
-    fontSize: 12,
-    color: "#475569",
-  },
+  labels: { textAlign: "center", fontSize: 12, color: "#475569" },
 };
 
 // ─── QUALITY RING ──────────────────────────────────────────────────────────
@@ -486,7 +482,6 @@ function AppContent() {
   const [tab, setTab] = useState("dashboard");
   const [joystickCommand, setJoystickCommand] = useState({ forward: 0, turn: 0 });
   
-  // ─── DYNAMIC ALERTS ──────────────────────────────────────────────────────
   const [currentAlert, setCurrentAlert] = useState(null);
   const [alertHistory, setAlertHistory] = useState([]);
   const [unreadAlertCount, setUnreadAlertCount] = useState(0);
@@ -537,7 +532,6 @@ function AppContent() {
     }
   }, []);
 
-  // ─── ALERT LOGIC ──────────────────────────────────────────────────────────
   const updateAlertState = useCallback((reading) => {
     if (!reading) return;
     
@@ -583,7 +577,6 @@ function AppContent() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // ─── WEBSOCKET ────────────────────────────────────────────────────────────
   useEffect(() => {
     let isMounted = true;
 
@@ -659,7 +652,6 @@ function AppContent() {
     };
   }, []);
 
-  // ─── HEALTH CHECK ─────────────────────────────────────────────────────────
   useEffect(() => {
     const check = async () => {
       try {
@@ -688,7 +680,6 @@ function AppContent() {
   const qualityScore = latest ? computeQualityScore(latest) : 0;
   const qualityLevel = getQualityLevel(qualityScore);
 
-  // Deduplicate history by _id
   const uniqueHistory = Array.from(
     new Map(history.map(item => [item._id, item])).values()
   );
@@ -696,7 +687,6 @@ function AppContent() {
   const allAlerts = alertHistory;
   const alertsCount = allAlerts.length;
 
-  // Sort by createdAt (newest first)
   const sortedHistory = [...uniqueHistory].sort((a, b) => {
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
@@ -1071,7 +1061,6 @@ function AppContent() {
   );
 }
 
-// ─── MAIN APP WITH ERROR BOUNDARY ──────────────────────────────────────────
 export default function App() {
   const [loading, setLoading] = useState(true);
 
